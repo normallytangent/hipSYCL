@@ -63,6 +63,7 @@ inline constexpr auto memory_order_release = memory_order::release;
 inline constexpr auto memory_order_acq_rel = memory_order::acq_rel;
 inline constexpr auto memory_order_seq_cst = memory_order::seq_cst;
 
+// TODO should these be moved to ../access.hpp?
 namespace access {
 
 enum class address_space : int
@@ -72,6 +73,13 @@ enum class address_space : int
   constant_space,
   private_space,
   generic_space
+};
+
+enum class decorated : int
+{
+  no,
+  yes,
+  legacy
 };
 
 } // namespace access
