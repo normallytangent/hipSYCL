@@ -1,32 +1,13 @@
 /*
- * This file is part of hipSYCL, a SYCL implementation based on CUDA/HIP
+ * This file is part of AdaptiveCpp, an implementation of SYCL and C++ standard
+ * parallelism for CPUs and GPUs.
  *
- * Copyright (c) 2023 Aksel Alpay and contributors
- * All rights reserved.
+ * Copyright The AdaptiveCpp Contributors
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *
- * 1. Redistributions of source code must retain the above copyright notice,
- * this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright notice,
- *    this list of conditions and the following disclaimer in the documentation
- *    and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * AdaptiveCpp is released under the BSD 2-Clause "Simplified" License.
+ * See file LICENSE in the project root for full license details.
  */
-
-
+// SPDX-License-Identifier: BSD-2-Clause
 #include "hipSYCL/compiler/reflection/IntrospectStructPass.hpp"
 #include "hipSYCL/compiler/utils/AggregateTypeUtils.hpp"
 #include "hipSYCL/common/debug.hpp"
@@ -47,18 +28,7 @@ namespace hipsycl {
 namespace compiler {
 
 namespace {
-constexpr const char* builtin_name = "__hipsycl_introspect_flattened_struct";
-
-llvm::AllocaInst *getPrevAllocaInst(llvm::Instruction *I) {
-  llvm::Instruction *CurrentInst = I;
-  while (CurrentInst) {
-    if (auto *AI = llvm::dyn_cast<llvm::AllocaInst>(CurrentInst)) {
-      return AI;
-    }
-    CurrentInst = CurrentInst->getPrevNonDebugInstruction();
-  }
-  return nullptr;
-}
+constexpr const char* builtin_name = "__acpp_introspect_flattened_struct";
 
 struct TypeInformation {
   int FlattenedNumMembers;
@@ -130,7 +100,7 @@ TypeInformationGlobalVars storeTypeInformationAsGlobals(llvm::Function *BuiltinI
                                                         const TypeInformation &TI) {
   TypeInformationGlobalVars TIGV;
 
-  std::string GVPrefix = "__hipsycl_typeinfo_" + BuiltinInstantiation->getName().str() + "_";
+  std::string GVPrefix = "__acpp_typeinfo_" + BuiltinInstantiation->getName().str() + "_";
 
   llvm::GlobalVariable *FlattenedNumMembersGV =
       new llvm::GlobalVariable(M, llvm::IntegerType::getInt32Ty(M.getContext()), true,
@@ -172,6 +142,32 @@ TypeInformationGlobalVars storeTypeInformationAsGlobals(llvm::Function *BuiltinI
   return TIGV;
 }
 
+llvm::AllocaInst *recurseOperandUntilAlloca(llvm::Instruction *I) {
+  if (auto *AI = llvm::dyn_cast<llvm::AllocaInst>(I))
+    return AI;
+
+  if (I->getNumOperands() == 0)
+    return nullptr;
+
+  if (auto *AI = llvm::dyn_cast<llvm::AllocaInst>(I->getOperand(0))) {
+    return AI;
+  } else if (auto *BI = llvm::dyn_cast<llvm::BitCastInst>(I->getOperand(0))) {
+    return recurseOperandUntilAlloca(BI);
+  } else if (auto *GEPI = llvm::dyn_cast<llvm::GetElementPtrInst>(I->getOperand(0))) {
+    return recurseOperandUntilAlloca(GEPI);
+  } else {
+    return nullptr;
+  }
+}
+
+llvm::Type* getPointerType(llvm::Type* PointeeT, int AddressSpace) {
+#if LLVM_VERSION_MAJOR < 16
+    return llvm::PointerType::get(PointeeT, AddressSpace);
+#else
+    return llvm::PointerType::get(PointeeT->getContext(), AddressSpace);
+#endif
+}
+
 } // anonymous namespace
 
 llvm::PreservedAnalyses IntrospectStructPass::run(llvm::Module& M, llvm::ModuleAnalysisManager& AM) {
@@ -182,61 +178,62 @@ llvm::PreservedAnalyses IntrospectStructPass::run(llvm::Module& M, llvm::ModuleA
     }
   }
 
-  
-  llvm::SmallDenseMap<llvm::Function*, TypeInformation> StructTypeInfoForBuiltin;
-  llvm::SmallVector<llvm::CallInst*, 16> Calls;
-  for(auto* F: BuiltinInstantiations) {
-    for(auto* U : F->users()) {
-      if(llvm::CallInst* CI = llvm::dyn_cast<llvm::CallInst>(U)) {
+  llvm::SmallDenseMap<llvm::Function *, TypeInformation> StructTypeInfoForBuiltin;
+  llvm::SmallVector<llvm::CallInst *, 16> Calls;
+  for (auto *F : BuiltinInstantiations) {
+    for (auto *U : F->users()) {
+      if (llvm::CallInst *CI = llvm::dyn_cast<llvm::CallInst>(U)) {
         Calls.push_back(CI);
-        // Obtain type referenced by builtin calls. To workaround opaque pointers, this
-        // assumes that an alloca instruction with the type is present in the preceding code.
-        auto* AI = getPrevAllocaInst(CI);
-        if(AI) {
-          llvm::Type* T = AI->getAllocatedType();
-          auto TI = getTypeInformation(T, M);
-          StructTypeInfoForBuiltin[F] = TI;
+
+        if (auto *AI = recurseOperandUntilAlloca(CI)) {
+          llvm::Type *T = AI->getAllocatedType();
+          StructTypeInfoForBuiltin[F] = getTypeInformation(T, M);
         } else {
           HIPSYCL_DEBUG_WARNING
-            << "IntrospectStructPass: " << F->getName().str()
-            << " instantiation could not be connected to type information, ignoring.\n";
+              << "IntrospectStructPass: " << F->getName().str()
+              << " instantiation could not be connected to type information, ignoring.\n";
         }
       }
     }
   }
 
-  for(auto* CI : Calls) {
-    llvm::Function* F = CI->getCalledFunction();
-    if(F) {
-      auto It = StructTypeInfoForBuiltin.find(F);
+  if (StructTypeInfoForBuiltin.size() > 0)
+    for(auto* CI : Calls) {
+      llvm::Function* F = CI->getCalledFunction();
+      if(F) {
+        auto It = StructTypeInfoForBuiltin.find(F);
 
-      auto GVs = storeTypeInformationAsGlobals(F, M, It->getSecond());
+        auto GVs = storeTypeInformationAsGlobals(F, M, It->getSecond());
 
-      if(It != StructTypeInfoForBuiltin.end()) {
-        if(F->getFunctionType()->getNumParams() != 4) {
-          HIPSYCL_DEBUG_WARNING << "IntrospectStructPass: Call to " << F->getName().str()
-                                << " has the wrong number of parameters, ignoring call\n";
-        } else {
-          auto createStoreOp = [&](int ArgIndex, llvm::GlobalVariable* GV) {
-            if(!CI->getArgOperand(ArgIndex)->getType()->isPointerTy()) {
-              HIPSYCL_DEBUG_WARNING
-                  << "IntrospectStructPass: Call to " << F->getName().str()
-                  << " is invalid; argument is not a pointer type. Ingoring call.\n";
-              return;
-            }
-            llvm::StoreInst *S =
-                new llvm::StoreInst(GV, CI->getArgOperand(ArgIndex), CI);
-          };
+        if(It != StructTypeInfoForBuiltin.end()) {
+          if(F->getFunctionType()->getNumParams() != 5) {
+            HIPSYCL_DEBUG_WARNING << "IntrospectStructPass: Call to " << F->getName().str()
+            << " has the wrong number of parameters, ignoring call\n";
+          } else {
+            auto createStoreOp = [&](int ArgIndex, llvm::GlobalVariable* GV) {
+              if(!CI->getArgOperand(ArgIndex)->getType()->isPointerTy()) {
+                HIPSYCL_DEBUG_WARNING
+                << "IntrospectStructPass: Call to " << F->getName().str()
+                << " is invalid; argument is not a pointer type. Ingoring call.\n";
+                return;
+              }
+              // In case of non-opaque pointers, we need a bitcast since the stored
+              // vaue may be pointer-to-array, while the argument may be pointer-to-pointer.
+              auto* StoreTarget = CI->getArgOperand(ArgIndex);
+              auto *BCInst =
+                  new llvm::BitCastInst(StoreTarget, getPointerType(GV->getType(), 0), "", CI);
+              [[maybe_unused]] llvm::StoreInst *S =
+                new llvm::StoreInst(GV, BCInst, CI);
+            };
 
-          createStoreOp(0, GVs.FlattenedNumMembers);
-          createStoreOp(1, GVs.MemberOffsets);
-          createStoreOp(2, GVs.MemberSizes);
-          createStoreOp(3, GVs.MemberKind);
-
+            createStoreOp(1, GVs.FlattenedNumMembers);
+            createStoreOp(2, GVs.MemberOffsets);
+            createStoreOp(3, GVs.MemberSizes);
+            createStoreOp(4, GVs.MemberKind);
+          }
         }
       }
     }
-  }
 
   // Lastly, remove calls and builtin declarations from IR
   for(auto* CI : Calls)
