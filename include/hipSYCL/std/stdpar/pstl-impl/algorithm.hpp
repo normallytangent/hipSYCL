@@ -209,6 +209,29 @@ ForwardIt2 copy_n(hipsycl::stdpar::par_unseq,
       count, ForwardIt2, offloader, fallback, first, count, result);
 }
 
+template <class BidirIt1, class BidirIt2>
+HIPSYCL_STDPAR_ENTRYPOINT BidirIt2 copy_backward(const hipsycl::stdpar::par_unseq,
+                                                  BidirIt1 first, BidirIt1 last,
+                                                  BidirIt2 d_last) {
+  auto offloader = [&](auto & queue) {
+    BidirIt2 d_first = d_last;
+    std::advance(d_first, std::distance(last, first));
+    hipsycl::algorithms::copy_backward(queue, first, last, d_last);
+    return d_first;
+  };
+
+  auto fallback = [&]() {
+    return std::copy_backward(hipsycl::stdpar::par_unseq_host_fallback, first, last,
+                              d_last);
+  };
+
+  HIPSYCL_STDPAR_OFFLOAD(
+    hipsycl::stdpar::algorithm(hipsycl::stdpar::algorithm_category::copy_backward{},
+                               hipsycl::stdpar::par_unseq{}),
+    std::distance(last, first), BidirIt2, offloader, fallback, first,
+    HIPSYCL_STDPAR_NO_PTR_VALIDATION(last), d_last);
+}
+
 template<class ForwardIt, class T >
 HIPSYCL_STDPAR_ENTRYPOINT
 void fill(hipsycl::stdpar::par_unseq,

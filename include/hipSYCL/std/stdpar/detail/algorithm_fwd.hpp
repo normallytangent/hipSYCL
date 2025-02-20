@@ -55,6 +55,11 @@ HIPSYCL_STDPAR_ENTRYPOINT ForwardIt2 copy_n(hipsycl::stdpar::par_unseq,
                                             ForwardIt1 first, Size count,
                                             ForwardIt2 result);
 
+template <class BidirIt1,class BidirIt2>
+HIPSYCL_STDPAR_ENTRYPOINT BidirIt2 copy_backward(hipsycl::stdpar::par_unseq,
+                                                BidirIt1 first, BidirIt1 last,
+                                                BidirIt2 d_last);
+
 template <class ForwardIt, class T>
 HIPSYCL_STDPAR_ENTRYPOINT void fill(hipsycl::stdpar::par_unseq, ForwardIt first,
                                     ForwardIt last, const T &value);

@@ -36,6 +36,7 @@ struct transform {};
 struct copy {};
 struct copy_if {};
 struct copy_n {};
+struct copy_backward {};
 struct fill {};
 struct fill_n {};
 struct generate {};
