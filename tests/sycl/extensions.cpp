@@ -107,9 +107,7 @@ BOOST_AUTO_TEST_CASE(custom_pfwi_synchronization_extension) {
 
       auto acc = buf.get_access<cl::sycl::access::mode::read_write>(cgh);
       auto scratch =
-          cl::sycl::accessor<int, 1, cl::sycl::access::mode::read_write,
-                             cl::sycl::access::target::local>{local_size,
-                                                                    cgh};
+          cl::sycl::local_accessor<int, 1>{local_size, cgh};
 
       cgh.parallel_for_work_group<class pfwi_dispatch>(
         cl::sycl::range<1>{global_size / local_size},
