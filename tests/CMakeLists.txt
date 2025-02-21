@@ -148,6 +148,7 @@ if(WITH_PSTL_TESTS)
     pstl/inclusive_scan.cpp
     pstl/memory.cpp
     pstl/merge.cpp
+    pstl/move.cpp
     pstl/none_of.cpp
     pstl/reduce.cpp
     pstl/replace.cpp
