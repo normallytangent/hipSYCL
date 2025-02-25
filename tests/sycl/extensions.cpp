@@ -238,7 +238,7 @@ template<class Name, int D>
 class nd_kernel_name;
 
 BOOST_AUTO_TEST_CASE_TEMPLATE(scoped_parallelism_api, _dimensions,
-                              test_dimensions::type) {
+                              test_dimensions) {
   constexpr int d = _dimensions::value;
   test_distribute_groups<nd_kernel_name<class ScopedParallelismDistrGroups, d>,
                          d>();
