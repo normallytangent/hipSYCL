@@ -127,6 +127,10 @@ HIPSYCL_STDPAR_ENTRYPOINT
 bool none_of(hipsycl::stdpar::par_unseq, ForwardIt first, ForwardIt last,
             UnaryPredicate p );
 
+template<class BidirIt, class ForwardIt>
+HIPSYCL_STDPAR_ENTRYPOINT ForwardIt reverse_copy (hipsycl::stdpar::par,
+                                                  BidirIt first, BidirIt last,
+                                                  ForwardIt d_first);
 }
 
 #endif
